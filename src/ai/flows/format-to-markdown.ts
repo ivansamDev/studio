@@ -39,11 +39,21 @@ const prompt = ai.definePrompt({
 The content below was fetched from the URL: {{{url}}}.
 The original content was processed using the '{{{processingOption}}}' method before being provided to you.
 
-- If '{{{processingOption}}}' is 'extract_body_strip_tags': The content is text extracted from the HTML body tag, with all HTML tags subsequently removed.
-- If '{{{processingOption}}}' is 'full_page_strip_tags': The content is text from the entire HTML page, with all HTML tags subsequently removed.
-- If '{{{processingOption}}}' is 'full_page_ai_handles_html': The content is the raw HTML of the entire page. Your task is to parse this HTML, identify and extract the main textual content (e.g., article, blog post), and convert it into well-structured Markdown. You should try to exclude common boilerplate like navigation menus, sidebars, headers, footers, ads, and script/style tags.
+- If '{{{processingOption}}}' is 'extract_body_strip_tags': The content is text extracted from the HTML body tag, with all HTML tags subsequently removed. Your task is to analyze this plain text, infer its structure, and convert it into well-structured Markdown. This includes:
+    - Correctly identifying and formatting paragraphs with appropriate line breaks.
+    - Detecting and formatting lists (bulleted or numbered).
+    - Recognizing potential headings (e.g., based on capitalization, context, or line breaks in the input) and formatting them using Markdown heading syntax (e.g., #, ##).
+    - Preserving or formatting pre-formatted text or code blocks if discernible (e.g., using fenced code blocks).
+    - Ensuring the output is valid, standard Markdown.
+- If '{{{processingOption}}}' is 'full_page_strip_tags': Similar to the above, but the content is text from the entire HTML page with tags removed. Apply the same principles of inferring structure from plain text and converting to well-structured Markdown. This includes ensuring appropriate paragraph separation, list formatting, and heading detection.
+- If '{{{processingOption}}}' is 'full_page_ai_handles_html': The content is the raw HTML of the entire page. Your task is to parse this HTML, identify and extract the main textual content (e.g., article, blog post), and convert it into well-structured, valid Markdown. You should:
+    - Convert HTML tags like <p>, <h1>-<h6>, <ul>, <ol>, <li>, <blockquote>, <pre>, <code>, <a>, <img>, <strong>, <em>, etc., to their Markdown equivalents (e.g., <p> to paragraph, <h1> to # Heading, <ul> to * list item).
+    - Attempt to exclude common boilerplate content such as navigation menus, sidebars, headers, footers, advertisements, and script/style tags unless they contain primary content.
+    - Ensure all HTML entities (e.g., &nbsp;, &lt;, &gt;, &amp;) are correctly handled or converted to their standard character representations or Markdown equivalents.
+    - Pay attention to nested structures and preserve them in Markdown where appropriate (e.g., nested lists).
 
-Based on the '{{{processingOption}}}' and the provided content, please generate clean, well-structured Markdown.
+Regardless of the processing option, the final output MUST be clean, valid, and readable Markdown.
+Focus on semantic conversion and readability. Avoid including any explanatory text or apologies in your response; return only the Markdown.
 
 Content:
 {{{content}}}
@@ -61,3 +71,4 @@ const formatURLToMarkdownFlow = ai.defineFlow(
     return output!;
   }
 );
+
