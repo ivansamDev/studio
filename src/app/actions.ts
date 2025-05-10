@@ -119,12 +119,20 @@ export async function fetchAndFormat(
           console.error(`External API returned an error in JSON: ${result.error}`);
           throw new Error(`External API returned an error: ${result.error}`);
         }
-        if (typeof result.markdown === 'string') {
-          markdownContent = result.markdown;
-          console.log("External API returned JSON with markdown content.");
+        // Expect markdown to be in the 'data' key
+        if (typeof result.data === 'string') {
+          markdownContent = result.data;
+          console.log("External API returned JSON with markdown content in 'data' key.");
         } else {
-          console.warn("External API JSON response did not include valid markdown content. Treating response as plain text.");
-          markdownContent = responseText; // Fallback if 'markdown' key is not a string
+          console.warn("External API JSON response did not include valid markdown content in 'data' key. Attempting to use 'markdown' key or treating response as plain text.");
+          // Fallback to 'markdown' key if 'data' key is not present or not a string
+          if (typeof result.markdown === 'string') {
+            markdownContent = result.markdown;
+            console.log("External API returned JSON with markdown content in 'markdown' key.");
+          } else {
+            console.warn("External API JSON response did not include 'data' or 'markdown' key with string value. Treating response as plain text.");
+            markdownContent = responseText; 
+          }
         }
       } catch (jsonError) {
         // If JSON.parse fails, assume the responseText is plain markdown
