@@ -1,8 +1,8 @@
+
 "use client";
 
 import type {NextPage} from 'next';
-import { useState, useEffect, useActionState } from 'react';
-// import { useFormStatus } from 'react-dom'; // No longer needed in SubmitButton directly
+import { useState, useEffect, useActionState, startTransition } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -54,7 +54,7 @@ const MarkdownFetcherPage: NextPage = () => {
   const [isCopied, setIsCopied] = useState(false);
   const { toast } = useToast();
 
-  const form = useForm<FormValues>({ // Use the type alias here
+  const form = useForm<FormValues>({ 
     resolver: zodResolver(formSchema),
     defaultValues: {
       url: "",
@@ -97,14 +97,15 @@ const MarkdownFetcherPage: NextPage = () => {
     }
   };
   
-  const onSubmit = (data: FormValues) => { // Use the type alias here
-    // Clear previous errors manually before new submission if they are for a different URL
+  const onSubmit = (data: FormValues) => {
     if (state.error && state.submittedUrl !== data.url) {
         form.clearErrors("url");
     }
     const formData = new FormData();
     formData.append('url', data.url);
-    formAction(formData);
+    startTransition(() => {
+      formAction(formData);
+    });
   };
 
 
@@ -177,3 +178,4 @@ const MarkdownFetcherPage: NextPage = () => {
 };
 
 export default MarkdownFetcherPage;
+
