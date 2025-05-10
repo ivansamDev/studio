@@ -15,6 +15,16 @@ export interface FetchAndFormatState {
   submittedUrl?: string;
 }
 
+function extractBodyContent(html: string): string {
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch && bodyMatch[1]) {
+    console.log("Successfully extracted content from <body> tag.");
+    return bodyMatch[1].trim();
+  }
+  console.warn("Could not find <body> tag or it was empty. Using full HTML content for Markdown conversion.");
+  return html;
+}
+
 export async function fetchAndFormat(
   prevState: FetchAndFormatState,
   formData: FormData
@@ -36,7 +46,7 @@ export async function fetchAndFormat(
   try {
     const response = await fetch(validatedUrl, {
       headers: {
-        'User-Agent': 'MarkdownFetcher/1.0', // Some sites block default fetch user agents
+        'User-Agent': 'MarkdownFetcher/1.0', 
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
       }
     });
@@ -46,22 +56,32 @@ export async function fetchAndFormat(
     }
 
     const contentType = response.headers.get('content-type');
-    // Allow common text-based content types
-    if (contentType && !/text\/html|text\/plain|application\/json|application\/xml|application\/rss\+xml/.test(contentType)) {
-      console.warn(`Fetching content type ${contentType}, which might not be ideal for Markdown conversion. Proceeding anyway.`);
+    if (contentType && !/text\/html/.test(contentType)) {
+       // If not HTML, we probably don't want to extract body and can proceed as before for other types
+      console.warn(`Content type is ${contentType}, not text/html. Processing full content.`);
     }
     
     const textContent = await response.text();
 
-    // Basic content size check to prevent overload (e.g., 1MB)
-    if (textContent.length > 1024 * 1024) { 
-      throw new Error("Content too large to process (max 1MB).");
+    if (textContent.length > 5 * 1024 * 1024) { // Increased limit to 5MB
+      throw new Error("Content too large to process (max 5MB).");
     }
     if (textContent.trim() === "") {
       throw new Error("Fetched content is empty.");
     }
 
-    const formatInput: FormatURLToMarkdownInput = { url: validatedUrl, content: textContent };
+    let contentToFormat = textContent;
+    if (contentType && /text\/html/.test(contentType)) {
+      contentToFormat = extractBodyContent(textContent);
+      if (contentToFormat.trim() === "") {
+        // If body extraction results in empty content, but original content was not empty
+        console.warn("Extracted body content is empty. Falling back to full text content for Markdown conversion.");
+        contentToFormat = textContent; // Fallback to full content if body is empty
+      }
+    }
+
+
+    const formatInput: FormatURLToMarkdownInput = { url: validatedUrl, content: contentToFormat };
     const result = await formatURLToMarkdown(formatInput);
     
     return { markdown: result.markdown, error: null, success: true, submittedUrl: validatedUrl };
@@ -72,10 +92,10 @@ export async function fetchAndFormat(
     if (error.message) {
       errorMessage = error.message;
     }
-    // Avoid leaking too much internal detail for common errors
     if (errorMessage.includes('fetch failed') || errorMessage.includes('ENOTFOUND') || errorMessage.includes('EAI_AGAIN')) {
         errorMessage = "Could not connect to the URL. Please check the URL and your internet connection.";
     }
     return { markdown: null, error: errorMessage, success: false, submittedUrl: validatedUrl };
   }
 }
+
