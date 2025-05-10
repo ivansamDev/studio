@@ -2,7 +2,7 @@
 "use client";
 
 import type {NextPage} from 'next';
-import { useState, useEffect, useActionState, startTransition } from 'react';
+import { useEffect, useActionState, startTransition, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -18,7 +18,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { AppHeader } from '@/components/app-header';
 import { fetchAndFormat, type FetchAndFormatState } from './actions';
-import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options'; // Updated import
+import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options';
+import { FloatingChat } from '@/components/floating-chat';
 
 
 const formSchema = z.object({
@@ -88,15 +89,14 @@ const MarkdownFetcherPage: NextPage = () => {
     }
     const currentFormValues = form.getValues();
     if (state.error) {
-      // Only show error if it pertains to the current URL and processing option
+      // Only set form error if the error corresponds to the current form input values
       if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentFormValues.processingOption) {
-        // The error might not always be for the 'url' field specifically if it's a general processing error
-        // For simplicity, we'll set it on 'url' or a general form error if possible.
-        // React Hook Form doesn't have a simple way to set a "form-level" error without a field.
-        // We'll stick to setting it on 'url' for now, or rely on the separate Alert component.
-        form.setError("url", { type: "manual", message: state.error.split(': ')[1] || state.error });
+        // Attempt to extract a more user-friendly part of the error, or use the full error
+        const errorMessage = state.error.includes(': ') ? state.error.split(': ').slice(1).join(': ') : state.error;
+        form.setError("url", { type: "manual", message: errorMessage });
       }
     } else if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentFormValues.processingOption) {
+        // Clear errors if submission was successful for current values
         form.clearErrors("url");
     }
   }, [state, form]);
@@ -123,7 +123,7 @@ const MarkdownFetcherPage: NextPage = () => {
   };
   
   const onSubmit = (data: FormValues) => {
-    // Clear previous errors manually before new submission if they are for a different URL/option
+     // Clear previous errors manually before new submission if they are for a different URL/option
     if (state.error && (state.submittedUrl !== data.url || state.submittedProcessingOption !== data.processingOption)) {
         form.clearErrors("url");
     }
@@ -232,8 +232,12 @@ const MarkdownFetcherPage: NextPage = () => {
           </CardContent>
         </Card>
       )}
+      <FloatingChat markdownContent={state.markdown} />
     </div>
   );
 };
 
 export default MarkdownFetcherPage;
+
+
+    

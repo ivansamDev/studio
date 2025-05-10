@@ -2,7 +2,8 @@
 'use server';
 
 import { formatURLToMarkdown, type FormatURLToMarkdownInput } from '@/ai/flows/format-to-markdown';
-import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options'; // Updated import
+import { chatWithMarkdown, type ChatWithMarkdownInput } from '@/ai/flows/chat-with-markdown-flow';
+import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options'; 
 import { z } from 'zod';
 
 const UrlInputSchema = z.object({
@@ -29,11 +30,8 @@ function extractBodyContent(html: string): string {
 }
 
 function stripHtmlTags(html: string): string {
-  // 1. Remove script and style blocks and their content
   let text = html.replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, '');
   text = text.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, '');
-
-  // 2. Replace block-level tags with newlines to preserve some structure
   const blockTags = [
     'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 
     'td', 'th', 'tr', 'caption', 'section', 'article', 'aside', 'nav', 
@@ -45,11 +43,7 @@ function stripHtmlTags(html: string): string {
   });
   text = text.replace(/<br\s*\/?>/gi, '\n');
   text = text.replace(/<hr\s*\/?>/gi, '\n\n---\n\n');
-
-  // 3. Remove all remaining HTML tags (leaves their content)
   text = text.replace(/<[^>]+>/g, '');
-
-  // 4. Decode common HTML entities
   text = text.replace(/&nbsp;/g, ' ');
   text = text.replace(/&lt;/g, '<');
   text = text.replace(/&gt;/g, '>');
@@ -58,12 +52,9 @@ function stripHtmlTags(html: string): string {
   text = text.replace(/&#39;/g, "'");
   text = text.replace(/&copy;/g, '©');
   text = text.replace(/&reg;/g, '®');
-  
-  // 5. Normalize whitespace
   text = text.replace(/ +/g, ' ');
   text = text.replace(/\n\s*\n/g, '\n\n');
   text = text.trim();
-
   return text;
 }
 
@@ -104,7 +95,7 @@ export async function fetchAndFormat(
     
     const fullHtmlContent = await response.text();
 
-    if (fullHtmlContent.length > 5 * 1024 * 1024) { // 5MB limit
+    if (fullHtmlContent.length > 5 * 1024 * 1024) { 
       throw new Error("Content too large to process (max 5MB).");
     }
     if (fullHtmlContent.trim() === "") {
@@ -122,10 +113,9 @@ export async function fetchAndFormat(
         contentForAI = stripHtmlTags(fullHtmlContent);
         break;
       case 'full_page_ai_handles_html':
-        contentForAI = fullHtmlContent; // Send raw HTML to AI
+        contentForAI = fullHtmlContent; 
         break;
       default:
-        // Should not happen due to schema validation
         throw new Error("Invalid processing option.");
     }
     
@@ -164,5 +154,37 @@ export async function fetchAndFormat(
       submittedUrl: validatedUrl,
       submittedProcessingOption: validatedProcessingOption
     };
+  }
+}
+
+export interface ChatAgentState {
+  agentResponse: string | null;
+  error: string | null;
+}
+
+export async function callChatAgentAction(input: {
+  userQuery: string;
+  markdownContent: string | null;
+  chatHistory: ChatWithMarkdownInput['chatHistory'];
+}): Promise<ChatAgentState> {
+  try {
+    const result = await chatWithMarkdown({
+      userQuery: input.userQuery,
+      markdownContent: input.markdownContent ?? undefined,
+      chatHistory: input.chatHistory,
+    });
+    return { agentResponse: result.agentResponse, error: null };
+  } catch (error: any) {
+    console.error("Error in callChatAgentAction:", error);
+    let errorMessage = "Failed to get response from agent.";
+    if (error.message) {
+        // Attempt to extract a more specific message if Genkit/API provides one
+        if (typeof error.message === 'string' && error.message.includes('reason: ')) {
+            errorMessage = error.message.split('reason: ')[1];
+        } else if (typeof error.message === 'string') {
+            errorMessage = error.message;
+        }
+    }
+    return { agentResponse: null, error: errorMessage };
   }
 }
