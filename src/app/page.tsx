@@ -157,6 +157,7 @@ const MarkdownFetcherPage: NextPage = () => {
   };
   
   const onSubmit = (data: FormValues) => {
+    console.log("Form submitted with data:", data); // Debugging line
     let finalProcessingOption: ProcessingOption;
 
     if (data.processingMethod === 'external_api') {
@@ -217,7 +218,7 @@ const MarkdownFetcherPage: NextPage = () => {
                 name="processingMethod"
                 render={({ field }) => (
                   <FormItem className="space-y-3">
-                    <FormLabel className="text-sm font-medium">Processing Data</FormLabel>
+                    <FormLabel className="text-sm font-medium">Processing Method</FormLabel>
                     <FormControl>
                       <RadioGroup
                         onValueChange={(value: 'local_ai' | 'external_api') => {
@@ -322,3 +323,4 @@ const MarkdownFetcherPage: NextPage = () => {
 };
 
 export default MarkdownFetcherPage;
+
