@@ -2,8 +2,9 @@
 "use client";
 
 import type {NextPage} from 'next';
-import { useState, useEffect, useTransition } from 'react';
-import { useFormState, useFormStatus } from 'react-dom';
+import { useState, useEffect, useTransition, useActionState } from 'react';
+// import { useFormState, useFormStatus } from 'react-dom'; // useFormStatus is still from react-dom
+import { useFormStatus } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -45,7 +46,7 @@ function SubmitButton() {
 }
 
 const MarkdownFetcherPage: NextPage = () => {
-  const [state, formAction] = useFormState(fetchAndFormat, initialState);
+  const [state, formAction] = useActionState(fetchAndFormat, initialState);
   const [isCopied, setIsCopied] = useState(false);
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -62,14 +63,20 @@ const MarkdownFetcherPage: NextPage = () => {
       // Optionally, scroll to results or give other feedback
     }
     if (state.error) {
-      form.setError("url", { type: "manual", message: state.error });
+      // Check if the error is for the current URL to avoid showing stale errors
+      if (state.submittedUrl === form.getValues("url")) {
+        form.setError("url", { type: "manual", message: state.error });
+      }
     }
-    if (state.submittedUrl && state.submittedUrl !== form.getValues("url")) {
+    if (!state.error && state.submittedUrl === form.getValues("url")) {
+        form.clearErrors("url");
+    }
+    // if (state.submittedUrl && state.submittedUrl !== form.getValues("url")) {
         // This might happen if form submitted with old data after URL change,
         // or if we want to reset form on new submission that comes from a different URL.
         // For now, let's ensure the input reflects what was submitted if an error occurred for that URL.
         // form.setValue("url", state.submittedUrl); 
-    }
+    // }
   }, [state, form]);
 
   const handleCopyToClipboard = async () => {
@@ -94,6 +101,10 @@ const MarkdownFetcherPage: NextPage = () => {
   };
   
   const onSubmit = (data: z.infer<typeof formSchema>) => {
+    // Clear previous errors manually before new submission if they are for a different URL
+    if (state.error && state.submittedUrl !== data.url) {
+        form.clearErrors("url");
+    }
     startTransition(() => {
       const formData = new FormData();
       formData.append('url', data.url);
@@ -138,7 +149,7 @@ const MarkdownFetcherPage: NextPage = () => {
         </CardContent>
       </Card>
 
-      {state.error && !state.success && (
+      {state.error && !state.success && state.submittedUrl === form.getValues("url") && (
         <Alert variant="destructive" className="mt-6 w-full max-w-2xl shadow-lg rounded-lg">
           <AlertCircle className="h-5 w-5" />
           <AlertTitle>Error Fetching URL</AlertTitle>
@@ -171,3 +182,4 @@ const MarkdownFetcherPage: NextPage = () => {
 };
 
 export default MarkdownFetcherPage;
+
