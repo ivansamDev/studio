@@ -55,19 +55,24 @@ function SubmitButton({ pending }: SubmitButtonProps) {
 const processingOptionsConfig: { value: ProcessingOption; label: string; description: string }[] = [
   { 
     value: 'extract_body_strip_tags', 
-    label: 'Extract Body & Strip HTML',
-    description: 'Extracts content from <body> tag, then removes all HTML. Good for articles.' 
+    label: 'Extract Body & Strip HTML (Local AI)',
+    description: 'Extracts content from <body>, removes HTML, then local AI formats to Markdown. Good for articles.' 
   },
   { 
     value: 'full_page_strip_tags', 
-    label: 'Full Page & Strip HTML',
-    description: 'Takes the entire page content, then removes all HTML tags.'
+    label: 'Full Page & Strip HTML (Local AI)',
+    description: 'Takes entire page, removes HTML, then local AI formats to Markdown.'
   },
   { 
     value: 'full_page_ai_handles_html', 
-    label: 'Full Page - AI Parses HTML',
-    description: 'Sends the raw HTML to the AI to parse and format. May be slower or less reliable.'
+    label: 'Full Page - Local AI Parses HTML',
+    description: 'Sends raw HTML to local AI to parse and format. Slower, good for complex pages.'
   },
+  {
+    value: 'external_api',
+    label: 'External API Handles Fetch & Format',
+    description: 'Delegates fetching URL content and Markdown conversion to a configured external API.'
+  }
 ];
 
 const MarkdownFetcherPage: NextPage = () => {

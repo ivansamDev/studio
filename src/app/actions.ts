@@ -82,61 +82,102 @@ export async function fetchAndFormat(
   const { url: validatedUrl, processingOption: validatedProcessingOption } = validationResult.data;
 
   try {
-    const response = await fetch(validatedUrl, {
-      headers: {
-        'User-Agent': 'MarkdownFetcher/1.0', 
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+    if (validatedProcessingOption === 'external_api') {
+      const externalApiUrl = process.env.EXTERNAL_MARKDOWN_API_URL;
+      if (!externalApiUrl) {
+        throw new Error("External API URL is not configured. Please set EXTERNAL_MARKDOWN_API_URL environment variable.");
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
-    }
-    
-    const fullHtmlContent = await response.text();
+      console.log(`Using external API: ${externalApiUrl} for URL: ${validatedUrl}`);
+      const apiResponse = await fetch(externalApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: validatedUrl }),
+      });
 
-    if (fullHtmlContent.length > 5 * 1024 * 1024) { 
-      throw new Error("Content too large to process (max 5MB).");
-    }
-    if (fullHtmlContent.trim() === "") {
-      throw new Error("Fetched content is empty.");
-    }
+      if (!apiResponse.ok) {
+        const errorBody = await apiResponse.text();
+        throw new Error(`External API request failed: ${apiResponse.status} ${apiResponse.statusText}. Details: ${errorBody}`);
+      }
 
-    let contentForAI: string;
+      const result = await apiResponse.json();
+      
+      if (result.error) {
+         throw new Error(`External API returned an error: ${result.error}`);
+      }
+      if (typeof result.markdown !== 'string') {
+        throw new Error("External API response did not include valid markdown content.");
+      }
 
-    switch (validatedProcessingOption) {
-      case 'extract_body_strip_tags':
-        const bodyContent = extractBodyContent(fullHtmlContent);
-        contentForAI = stripHtmlTags(bodyContent);
-        break;
-      case 'full_page_strip_tags':
-        contentForAI = stripHtmlTags(fullHtmlContent);
-        break;
-      case 'full_page_ai_handles_html':
-        contentForAI = fullHtmlContent; 
-        break;
-      default:
-        throw new Error("Invalid processing option.");
+      return { 
+        markdown: result.markdown, 
+        error: null, 
+        success: true, 
+        submittedUrl: validatedUrl,
+        submittedProcessingOption: validatedProcessingOption 
+      };
+
+    } else {
+      // Existing local AI processing logic
+      const response = await fetch(validatedUrl, {
+        headers: {
+          'User-Agent': 'MarkdownFetcher/1.0', 
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
+      }
+      
+      const fullHtmlContent = await response.text();
+
+      if (fullHtmlContent.length > 5 * 1024 * 1024) { 
+        throw new Error("Content too large to process (max 5MB).");
+      }
+      if (fullHtmlContent.trim() === "") {
+        throw new Error("Fetched content is empty.");
+      }
+
+      let contentForAI: string;
+
+      switch (validatedProcessingOption) {
+        case 'extract_body_strip_tags':
+          const bodyContent = extractBodyContent(fullHtmlContent);
+          contentForAI = stripHtmlTags(bodyContent);
+          break;
+        case 'full_page_strip_tags':
+          contentForAI = stripHtmlTags(fullHtmlContent);
+          break;
+        case 'full_page_ai_handles_html':
+          contentForAI = fullHtmlContent; 
+          break;
+        default:
+          // This case should ideally not be reached if validatedProcessingOption is 'external_api' and handled above
+          throw new Error("Invalid local processing option.");
+      }
+      
+      if (contentForAI.trim() === "" && validatedProcessingOption !== 'full_page_ai_handles_html') {
+        console.warn(`Content became empty after processing option: ${validatedProcessingOption}. This might indicate an HTML-only page or an issue with content structure.`);
+      }
+      
+      const formatInput: FormatURLToMarkdownInput = { 
+        url: validatedUrl, 
+        content: contentForAI,
+        processingOption: validatedProcessingOption 
+      };
+      const result = await formatURLToMarkdown(formatInput);
+      
+      return { 
+        markdown: result.markdown, 
+        error: null, 
+        success: true, 
+        submittedUrl: validatedUrl,
+        submittedProcessingOption: validatedProcessingOption 
+      };
     }
-    
-    if (contentForAI.trim() === "" && validatedProcessingOption !== 'full_page_ai_handles_html') {
-      console.warn(`Content became empty after processing option: ${validatedProcessingOption}. This might indicate an HTML-only page or an issue with content structure.`);
-    }
-    
-    const formatInput: FormatURLToMarkdownInput = { 
-      url: validatedUrl, 
-      content: contentForAI,
-      processingOption: validatedProcessingOption
-    };
-    const result = await formatURLToMarkdown(formatInput);
-    
-    return { 
-      markdown: result.markdown, 
-      error: null, 
-      success: true, 
-      submittedUrl: validatedUrl,
-      submittedProcessingOption: validatedProcessingOption 
-    };
 
   } catch (error: any) {
     console.error("Error in fetchAndFormat action:", error);
