@@ -66,25 +66,32 @@ export async function fetchAndFormat(
   const rawUrl = formData.get('url');
   const rawProcessingOption = formData.get('processingOption') as ProcessingOption;
 
+  console.log("fetchAndFormat action called. FormData:", {url: rawUrl, processingOption: rawProcessingOption});
+
+
   const validationResult = UrlInputSchema.safeParse({ 
     url: rawUrl, 
     processingOption: rawProcessingOption 
   });
 
   if (!validationResult.success) {
+    const errorMessages = validationResult.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
+    console.error("Validation failed:", errorMessages);
     return {
       markdown: null,
-      error: validationResult.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+      error: errorMessages,
       success: false,
     };
   }
 
   const { url: validatedUrl, processingOption: validatedProcessingOption } = validationResult.data;
+  console.log("Validation successful. Processing with:", { validatedUrl, validatedProcessingOption });
 
   try {
     if (validatedProcessingOption === 'external_api') {
       const externalApiUrl = process.env.EXTERNAL_MARKDOWN_API_URL;
       if (!externalApiUrl) {
+        console.error("External API URL not configured.");
         throw new Error("External API URL is not configured. Please set EXTERNAL_MARKDOWN_API_URL environment variable.");
       }
 
@@ -99,20 +106,40 @@ export async function fetchAndFormat(
 
       if (!apiResponse.ok) {
         const errorBody = await apiResponse.text();
+        console.error(`External API request failed: ${apiResponse.status} ${apiResponse.statusText}. Details: ${errorBody}`);
         throw new Error(`External API request failed: ${apiResponse.status} ${apiResponse.statusText}. Details: ${errorBody}`);
       }
 
-      const result = await apiResponse.json();
-      
-      if (result.error) {
-         throw new Error(`External API returned an error: ${result.error}`);
-      }
-      if (typeof result.markdown !== 'string') {
-        throw new Error("External API response did not include valid markdown content.");
-      }
+      const responseText = await apiResponse.text();
+      let markdownContent: string;
 
+      try {
+        const result = JSON.parse(responseText);
+        if (result.error) {
+          console.error(`External API returned an error in JSON: ${result.error}`);
+          throw new Error(`External API returned an error: ${result.error}`);
+        }
+        if (typeof result.markdown === 'string') {
+          markdownContent = result.markdown;
+          console.log("External API returned JSON with markdown content.");
+        } else {
+          console.warn("External API JSON response did not include valid markdown content. Treating response as plain text.");
+          markdownContent = responseText; // Fallback if 'markdown' key is not a string
+        }
+      } catch (jsonError) {
+        // If JSON.parse fails, assume the responseText is plain markdown
+        console.log("External API response is not valid JSON. Treating as plain text markdown.", jsonError);
+        markdownContent = responseText;
+      }
+      
+      if (typeof markdownContent !== 'string' || markdownContent.trim() === "") {
+        console.error("External API response did not result in valid non-empty markdown content.");
+        throw new Error("External API response did not provide valid markdown content.");
+      }
+      
+      console.log("Successfully received markdown from external API.");
       return { 
-        markdown: result.markdown, 
+        markdown: markdownContent, 
         error: null, 
         success: true, 
         submittedUrl: validatedUrl,
@@ -121,6 +148,7 @@ export async function fetchAndFormat(
 
     } else {
       // Existing local AI processing logic
+      console.log("Using local AI processing for URL:", validatedUrl);
       const response = await fetch(validatedUrl, {
         headers: {
           'User-Agent': 'MarkdownFetcher/1.0', 
@@ -129,15 +157,18 @@ export async function fetchAndFormat(
       });
 
       if (!response.ok) {
+        console.error(`Failed to fetch URL locally: ${response.status} ${response.statusText}`);
         throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
       }
       
       const fullHtmlContent = await response.text();
 
       if (fullHtmlContent.length > 5 * 1024 * 1024) { 
+        console.error("Content too large to process (max 5MB).");
         throw new Error("Content too large to process (max 5MB).");
       }
       if (fullHtmlContent.trim() === "") {
+        console.error("Fetched content is empty.");
         throw new Error("Fetched content is empty.");
       }
 
@@ -147,20 +178,23 @@ export async function fetchAndFormat(
         case 'extract_body_strip_tags':
           const bodyContent = extractBodyContent(fullHtmlContent);
           contentForAI = stripHtmlTags(bodyContent);
+          console.log("Local AI: Extracted body and stripped tags.");
           break;
         case 'full_page_strip_tags':
           contentForAI = stripHtmlTags(fullHtmlContent);
+          console.log("Local AI: Stripped tags from full page.");
           break;
         case 'full_page_ai_handles_html':
           contentForAI = fullHtmlContent; 
+          console.log("Local AI: Sending full page HTML to AI.");
           break;
         default:
-          // This case should ideally not be reached if validatedProcessingOption is 'external_api' and handled above
+          console.error("Invalid local processing option encountered:", validatedProcessingOption);
           throw new Error("Invalid local processing option.");
       }
       
       if (contentForAI.trim() === "" && validatedProcessingOption !== 'full_page_ai_handles_html') {
-        console.warn(`Content became empty after processing option: ${validatedProcessingOption}. This might indicate an HTML-only page or an issue with content structure.`);
+        console.warn(`Content became empty after local processing option: ${validatedProcessingOption}. This might indicate an HTML-only page or an issue with content structure.`);
       }
       
       const formatInput: FormatURLToMarkdownInput = { 
@@ -168,7 +202,9 @@ export async function fetchAndFormat(
         content: contentForAI,
         processingOption: validatedProcessingOption 
       };
+      console.log("Sending content to local AI for formatting.");
       const result = await formatURLToMarkdown(formatInput);
+      console.log("Successfully received markdown from local AI.");
       
       return { 
         markdown: result.markdown, 
@@ -229,3 +265,4 @@ export async function callChatAgentAction(input: {
     return { agentResponse: null, error: errorMessage };
   }
 }
+
