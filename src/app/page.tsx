@@ -13,17 +13,19 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Toaster } from "@/components/ui/toaster";
 import { useToast } from "@/hooks/use-toast";
 import { AppHeader } from '@/components/app-header';
 import { fetchAndFormat, type FetchAndFormatState } from './actions';
+import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options'; // Updated import
+
 
 const formSchema = z.object({
   url: z.string().url({ message: "Please enter a valid URL (e.g., https://example.com)." }),
+  processingOption: ProcessingOptionsEnum.default('extract_body_strip_tags'),
 });
 
-// Define a type alias for the form values
 type FormValues = z.infer<typeof formSchema>;
 
 const initialState: FetchAndFormatState = {
@@ -49,6 +51,24 @@ function SubmitButton({ pending }: SubmitButtonProps) {
   );
 }
 
+const processingOptionsConfig: { value: ProcessingOption; label: string; description: string }[] = [
+  { 
+    value: 'extract_body_strip_tags', 
+    label: 'Extract Body & Strip HTML',
+    description: 'Extracts content from <body> tag, then removes all HTML. Good for articles.' 
+  },
+  { 
+    value: 'full_page_strip_tags', 
+    label: 'Full Page & Strip HTML',
+    description: 'Takes the entire page content, then removes all HTML tags.'
+  },
+  { 
+    value: 'full_page_ai_handles_html', 
+    label: 'Full Page - AI Parses HTML',
+    description: 'Sends the raw HTML to the AI to parse and format. May be slower or less reliable.'
+  },
+];
+
 const MarkdownFetcherPage: NextPage = () => {
   const [state, formAction, isPending] = useActionState(fetchAndFormat, initialState);
   const [isCopied, setIsCopied] = useState(false);
@@ -58,6 +78,7 @@ const MarkdownFetcherPage: NextPage = () => {
     resolver: zodResolver(formSchema),
     defaultValues: {
       url: "",
+      processingOption: "extract_body_strip_tags",
     },
   });
 
@@ -65,13 +86,17 @@ const MarkdownFetcherPage: NextPage = () => {
     if (state.success && state.markdown) {
       // Optionally, scroll to results or give other feedback
     }
+    const currentFormValues = form.getValues();
     if (state.error) {
-      // Check if the error is for the current URL to avoid showing stale errors
-      if (state.submittedUrl === form.getValues("url")) {
-        form.setError("url", { type: "manual", message: state.error });
+      // Only show error if it pertains to the current URL and processing option
+      if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentFormValues.processingOption) {
+        // The error might not always be for the 'url' field specifically if it's a general processing error
+        // For simplicity, we'll set it on 'url' or a general form error if possible.
+        // React Hook Form doesn't have a simple way to set a "form-level" error without a field.
+        // We'll stick to setting it on 'url' for now, or rely on the separate Alert component.
+        form.setError("url", { type: "manual", message: state.error.split(': ')[1] || state.error });
       }
-    }
-    if (!state.error && state.submittedUrl === form.getValues("url")) {
+    } else if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentFormValues.processingOption) {
         form.clearErrors("url");
     }
   }, [state, form]);
@@ -98,11 +123,14 @@ const MarkdownFetcherPage: NextPage = () => {
   };
   
   const onSubmit = (data: FormValues) => {
-    if (state.error && state.submittedUrl !== data.url) {
+    // Clear previous errors manually before new submission if they are for a different URL/option
+    if (state.error && (state.submittedUrl !== data.url || state.submittedProcessingOption !== data.processingOption)) {
         form.clearErrors("url");
     }
     const formData = new FormData();
     formData.append('url', data.url);
+    formData.append('processingOption', data.processingOption);
+    
     startTransition(() => {
       formAction(formData);
     });
@@ -110,13 +138,13 @@ const MarkdownFetcherPage: NextPage = () => {
 
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 bg-background text-foreground">
+    <div className="min-h-screen flex flex-col items-center p-4 sm:p-6 bg-background text-foreground">
       <AppHeader />
 
       <Card className="w-full max-w-2xl shadow-xl rounded-lg">
         <CardHeader>
-          <CardTitle className="text-2xl font-semibold">Enter URL</CardTitle>
-          <CardDescription>Paste a web address to fetch and format its content.</CardDescription>
+          <CardTitle className="text-2xl font-semibold">Enter URL & Options</CardTitle>
+          <CardDescription>Paste a web address and choose how to process its content.</CardDescription>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -131,11 +159,43 @@ const MarkdownFetcherPage: NextPage = () => {
                       <Input 
                         placeholder="https://example.com" 
                         {...field} 
-                        className="py-3 text-base bg-background border-border focus:ring-primary focus:border-primary" 
+                        className="py-3 text-base bg-secondary/50 border-border focus:ring-primary focus:border-primary" 
                         aria-describedby="url-error"
                       />
                     </FormControl>
                     <FormMessage id="url-error" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="processingOption"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormLabel className="text-sm font-medium">Processing Option</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        className="flex flex-col space-y-2"
+                      >
+                        {processingOptionsConfig.map((option) => (
+                          <FormItem key={option.value} className="flex items-start space-x-3 space-y-0 p-3 border rounded-md bg-secondary/20 hover:bg-secondary/40 transition-colors">
+                            <FormControl>
+                              <RadioGroupItem value={option.value} />
+                            </FormControl>
+                            <div className="space-y-1 leading-none">
+                              <FormLabel className="font-normal cursor-pointer">
+                                {option.label}
+                              </FormLabel>
+                              <p className="text-xs text-muted-foreground">{option.description}</p>
+                            </div>
+                          </FormItem>
+                        ))}
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -145,10 +205,10 @@ const MarkdownFetcherPage: NextPage = () => {
         </CardContent>
       </Card>
 
-      {state.error && !state.success && state.submittedUrl === form.getValues("url") && (
+      {state.error && !state.success && state.submittedUrl === form.getValues("url") && state.submittedProcessingOption === form.getValues("processingOption") && (
         <Alert variant="destructive" className="mt-6 w-full max-w-2xl shadow-lg rounded-lg">
           <AlertCircle className="h-5 w-5" />
-          <AlertTitle>Error Fetching URL</AlertTitle>
+          <AlertTitle>Error Processing URL</AlertTitle>
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       )}
@@ -172,10 +232,8 @@ const MarkdownFetcherPage: NextPage = () => {
           </CardContent>
         </Card>
       )}
-      <Toaster />
     </div>
   );
 };
 
 export default MarkdownFetcherPage;
-

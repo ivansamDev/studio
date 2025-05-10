@@ -2,10 +2,12 @@
 'use server';
 
 import { formatURLToMarkdown, type FormatURLToMarkdownInput } from '@/ai/flows/format-to-markdown';
+import { ProcessingOptionsEnum, type ProcessingOption } from '@/lib/schemas/processing-options'; // Updated import
 import { z } from 'zod';
 
 const UrlInputSchema = z.object({
   url: z.string().url({ message: "Please enter a valid URL." }),
+  processingOption: ProcessingOptionsEnum,
 });
 
 export interface FetchAndFormatState {
@@ -13,6 +15,7 @@ export interface FetchAndFormatState {
   error: string | null;
   success: boolean;
   submittedUrl?: string;
+  submittedProcessingOption?: ProcessingOption;
 }
 
 function extractBodyContent(html: string): string {
@@ -21,7 +24,7 @@ function extractBodyContent(html: string): string {
     console.log("Successfully extracted content from <body> tag.");
     return bodyMatch[1].trim();
   }
-  console.warn("Could not find <body> tag or it was empty. Using full HTML content for Markdown conversion.");
+  console.warn("Could not find <body> tag or it was empty. Using full HTML content for processing.");
   return html;
 }
 
@@ -37,13 +40,10 @@ function stripHtmlTags(html: string): string {
     'header', 'footer', 'address', 'dd', 'dt', 'dl', 'figure', 'figcaption'
   ];
   blockTags.forEach(tag => {
-    // Add newline before opening tag and after closing tag to separate blocks
     text = text.replace(new RegExp(`<${tag}(\\s[^>]*)?>`, 'gi'), `\n$&`);
     text = text.replace(new RegExp(`</${tag}>`, 'gi'), '$&\n');
   });
-  // Handle <br> tags specifically by converting them to newlines
   text = text.replace(/<br\s*\/?>/gi, '\n');
-  // Handle <hr> tags by converting them to a thematic break in Markdown
   text = text.replace(/<hr\s*\/?>/gi, '\n\n---\n\n');
 
   // 3. Remove all remaining HTML tags (leaves their content)
@@ -58,14 +58,10 @@ function stripHtmlTags(html: string): string {
   text = text.replace(/&#39;/g, "'");
   text = text.replace(/&copy;/g, '©');
   text = text.replace(/&reg;/g, '®');
-  // Add more entities as needed or rely on LLM for more complex ones.
-
-  // 5. Normalize whitespace:
-  // Replace multiple spaces (not newlines yet) with a single space
+  
+  // 5. Normalize whitespace
   text = text.replace(/ +/g, ' ');
-  // Collapse multiple newlines down to a maximum of two (to preserve paragraph breaks)
   text = text.replace(/\n\s*\n/g, '\n\n');
-  // Remove leading/trailing whitespace (including newlines) from the final text
   text = text.trim();
 
   return text;
@@ -77,18 +73,22 @@ export async function fetchAndFormat(
   formData: FormData
 ): Promise<FetchAndFormatState> {
   const rawUrl = formData.get('url');
+  const rawProcessingOption = formData.get('processingOption') as ProcessingOption;
 
-  const validationResult = UrlInputSchema.safeParse({ url: rawUrl });
+  const validationResult = UrlInputSchema.safeParse({ 
+    url: rawUrl, 
+    processingOption: rawProcessingOption 
+  });
 
   if (!validationResult.success) {
     return {
       markdown: null,
-      error: validationResult.error.errors.map((e) => e.message).join(', '),
+      error: validationResult.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
       success: false,
     };
   }
 
-  const validatedUrl = validationResult.data.url;
+  const { url: validatedUrl, processingOption: validatedProcessingOption } = validationResult.data;
 
   try {
     const response = await fetch(validatedUrl, {
@@ -102,53 +102,51 @@ export async function fetchAndFormat(
       throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
     }
     
-    const textContent = await response.text();
+    const fullHtmlContent = await response.text();
 
-    if (textContent.length > 5 * 1024 * 1024) { // Increased limit to 5MB
+    if (fullHtmlContent.length > 5 * 1024 * 1024) { // 5MB limit
       throw new Error("Content too large to process (max 5MB).");
     }
-    if (textContent.trim() === "") {
+    if (fullHtmlContent.trim() === "") {
       throw new Error("Fetched content is empty.");
     }
 
-    let contentToProcess = textContent;
-    const contentType = response.headers.get('content-type');
+    let contentForAI: string;
 
-    if (contentType && /text\/html/.test(contentType)) {
-      const extractedBody = extractBodyContent(textContent);
-      // Use extracted body if it's meaningful and different from the full HTML
-      if (extractedBody !== textContent && extractedBody.trim() !== "") {
-        console.log("Using extracted body content for HTML stripping.");
-        contentToProcess = extractedBody;
-      } else {
-        // Body not found, empty, or not significantly different from full HTML.
-        // Log appropriate message but continue to process full textContent.
-        if (extractedBody.trim() === "" && textContent.trim() !== "") {
-            console.warn("Extracted body content was empty, but original HTML was not. Stripping tags from full HTML.");
-        } else {
-            console.log("Body content not extracted or same as full HTML. Stripping tags from full HTML content.");
-        }
-        // contentToProcess remains textContent
-      }
-    } else if (contentType) {
-      console.warn(`Content type is ${contentType}, not text/html. Attempting to strip any HTML tags found.`);
-    } else {
-      console.warn(`Content type not specified. Attempting to strip any HTML tags found.`);
+    switch (validatedProcessingOption) {
+      case 'extract_body_strip_tags':
+        const bodyContent = extractBodyContent(fullHtmlContent);
+        contentForAI = stripHtmlTags(bodyContent);
+        break;
+      case 'full_page_strip_tags':
+        contentForAI = stripHtmlTags(fullHtmlContent);
+        break;
+      case 'full_page_ai_handles_html':
+        contentForAI = fullHtmlContent; // Send raw HTML to AI
+        break;
+      default:
+        // Should not happen due to schema validation
+        throw new Error("Invalid processing option.");
     }
     
-    const finalStrippedContent = stripHtmlTags(contentToProcess);
-
-    if (finalStrippedContent.trim() === "") {
-      // This could happen if the HTML contained only tags and no actual text content
-      console.warn("Content became empty after stripping HTML tags. This might indicate an HTML-only page or an issue with content structure.");
-      // Depending on desired behavior, could throw an error or return specific message.
-      // For now, we'll proceed, and the AI might return an empty markdown or a note.
+    if (contentForAI.trim() === "" && validatedProcessingOption !== 'full_page_ai_handles_html') {
+      console.warn(`Content became empty after processing option: ${validatedProcessingOption}. This might indicate an HTML-only page or an issue with content structure.`);
     }
-
-    const formatInput: FormatURLToMarkdownInput = { url: validatedUrl, content: finalStrippedContent };
+    
+    const formatInput: FormatURLToMarkdownInput = { 
+      url: validatedUrl, 
+      content: contentForAI,
+      processingOption: validatedProcessingOption
+    };
     const result = await formatURLToMarkdown(formatInput);
     
-    return { markdown: result.markdown, error: null, success: true, submittedUrl: validatedUrl };
+    return { 
+      markdown: result.markdown, 
+      error: null, 
+      success: true, 
+      submittedUrl: validatedUrl,
+      submittedProcessingOption: validatedProcessingOption 
+    };
 
   } catch (error: any) {
     console.error("Error in fetchAndFormat action:", error);
@@ -159,6 +157,12 @@ export async function fetchAndFormat(
     if (errorMessage.includes('fetch failed') || errorMessage.includes('ENOTFOUND') || errorMessage.includes('EAI_AGAIN')) {
         errorMessage = "Could not connect to the URL. Please check the URL and your internet connection.";
     }
-    return { markdown: null, error: errorMessage, success: false, submittedUrl: validatedUrl };
+    return { 
+      markdown: null, 
+      error: errorMessage, 
+      success: false, 
+      submittedUrl: validatedUrl,
+      submittedProcessingOption: validatedProcessingOption
+    };
   }
 }
