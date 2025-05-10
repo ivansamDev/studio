@@ -1,10 +1,8 @@
-
 "use client";
 
 import type {NextPage} from 'next';
-import { useState, useEffect, useTransition, useActionState } from 'react';
-// import { useFormState, useFormStatus } from 'react-dom'; // useFormStatus is still from react-dom
-import { useFormStatus } from 'react-dom';
+import { useState, useEffect, useActionState } from 'react';
+// import { useFormStatus } from 'react-dom'; // No longer needed in SubmitButton directly
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -25,14 +23,20 @@ const formSchema = z.object({
   url: z.string().url({ message: "Please enter a valid URL (e.g., https://example.com)." }),
 });
 
+// Define a type alias for the form values
+type FormValues = z.infer<typeof formSchema>;
+
 const initialState: FetchAndFormatState = {
   markdown: null,
   error: null,
   success: false,
 };
 
-function SubmitButton() {
-  const { pending } = useFormStatus();
+interface SubmitButtonProps {
+  pending: boolean;
+}
+
+function SubmitButton({ pending }: SubmitButtonProps) {
   return (
     <Button type="submit" disabled={pending} className="w-full py-3 text-base">
       {pending ? (
@@ -46,12 +50,11 @@ function SubmitButton() {
 }
 
 const MarkdownFetcherPage: NextPage = () => {
-  const [state, formAction] = useActionState(fetchAndFormat, initialState);
+  const [state, formAction, isPending] = useActionState(fetchAndFormat, initialState);
   const [isCopied, setIsCopied] = useState(false);
   const { toast } = useToast();
-  const [isPending, startTransition] = useTransition();
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  const form = useForm<FormValues>({ // Use the type alias here
     resolver: zodResolver(formSchema),
     defaultValues: {
       url: "",
@@ -71,12 +74,6 @@ const MarkdownFetcherPage: NextPage = () => {
     if (!state.error && state.submittedUrl === form.getValues("url")) {
         form.clearErrors("url");
     }
-    // if (state.submittedUrl && state.submittedUrl !== form.getValues("url")) {
-        // This might happen if form submitted with old data after URL change,
-        // or if we want to reset form on new submission that comes from a different URL.
-        // For now, let's ensure the input reflects what was submitted if an error occurred for that URL.
-        // form.setValue("url", state.submittedUrl); 
-    // }
   }, [state, form]);
 
   const handleCopyToClipboard = async () => {
@@ -100,16 +97,14 @@ const MarkdownFetcherPage: NextPage = () => {
     }
   };
   
-  const onSubmit = (data: z.infer<typeof formSchema>) => {
+  const onSubmit = (data: FormValues) => { // Use the type alias here
     // Clear previous errors manually before new submission if they are for a different URL
     if (state.error && state.submittedUrl !== data.url) {
         form.clearErrors("url");
     }
-    startTransition(() => {
-      const formData = new FormData();
-      formData.append('url', data.url);
-      formAction(formData);
-    });
+    const formData = new FormData();
+    formData.append('url', data.url);
+    formAction(formData);
   };
 
 
@@ -143,7 +138,7 @@ const MarkdownFetcherPage: NextPage = () => {
                   </FormItem>
                 )}
               />
-              <SubmitButton />
+              <SubmitButton pending={isPending} />
             </form>
           </Form>
         </CardContent>
@@ -182,4 +177,3 @@ const MarkdownFetcherPage: NextPage = () => {
 };
 
 export default MarkdownFetcherPage;
-
