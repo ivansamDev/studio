@@ -45,17 +45,22 @@ const chatPrompt = ai.definePrompt({
   name: 'chatWithMarkdownPrompt',
   input: {schema: ChatWithMarkdownInputSchema},
   output: {schema: ChatWithMarkdownOutputSchema},
-  prompt: `You are a helpful AI assistant.
+  prompt: `You are an AI assistant.
+Your primary task is to answer questions based ONLY on the provided Markdown content below, if the question is relevant to it.
+You MUST respond in the same language as the user's query.
+
 {{#if markdownContent}}
-The user is currently viewing the following Markdown content. Use this as the primary context if their questions seem relevant to it.
+The user is viewing the following Markdown content:
 <markdown_content>
 {{{markdownContent}}}
 </markdown_content>
+If the user's query "{{{userQuery}}}" is related to this content, your answer MUST be based SOLELY on this information. Do not use external knowledge for questions about this content.
+If the query is clearly unrelated to the Markdown content, or if the content does not provide an answer to a related question, you should state that the content does not cover the topic. You may then use your general knowledge to answer if appropriate, but clearly indicate that the information is not from the provided Markdown.
 {{else}}
-The user has not provided any specific content. Answer their questions generally. If they ask about content, inform them that no content has been fetched yet.
+No specific Markdown content has been provided. Answer the user's questions generally. If they ask about specific content, inform them that no content has been fetched yet.
 {{/if}}
 
-Based on the provided context (if any) and the conversation history, respond to the user's latest query: "{{{userQuery}}}"
+Respond to the user's query: "{{{userQuery}}}"
 `,
 });
 
