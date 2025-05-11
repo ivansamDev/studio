@@ -6,7 +6,7 @@ import { useEffect, useActionState, startTransition, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { LinkIcon, Loader2, ClipboardCopy, Check, AlertCircle } from 'lucide-react';
+import { LinkIcon, Loader2, ClipboardCopy, Check, AlertCircle, MessageSquare } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,7 +17,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { AppHeader } from '@/components/app-header';
-import { fetchAndFormat, type FetchAndFormatState } from './actions';
+import { fetchAndFormat, type FetchAndFormatState, callChatAgentAction, type ChatAgentState } from './actions';
+import type { ChatWithMarkdownInput } from '@/ai/flows/chat-with-markdown-flow';
 import { 
   ProcessingOptionsEnum, 
   LocalAiProcessingDetailOptionsEnum,
@@ -43,11 +44,14 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
-const initialState: FetchAndFormatState = {
+const initialFetchState: FetchAndFormatState = {
   markdown: null,
   error: null,
   success: false,
+  submittedUrl: undefined,
+  submittedProcessingOption: undefined,
 };
+
 
 interface SubmitButtonProps {
   pending: boolean;
@@ -98,8 +102,9 @@ const localAiDetailOptionsConfig: { value: LocalAiProcessingDetailOption; label:
 ];
 
 const MarkdownFetcherPage: NextPage = () => {
-  const [state, formAction, isPending] = useActionState(fetchAndFormat, initialState);
+  const [fetchState, formAction, isFetchPending] = useActionState(fetchAndFormat, initialFetchState);
   const [isCopied, setIsCopied] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const { toast } = useToast();
 
   const form = useForm<FormValues>({ 
@@ -114,9 +119,12 @@ const MarkdownFetcherPage: NextPage = () => {
   const watchedProcessingMethod = form.watch('processingMethod');
 
  useEffect(() => {
-    if (state.success && state.markdown) {
-      // Optionally, scroll to results or give other feedback
+    if (fetchState.success && fetchState.markdown) {
+      setShowChat(true); // Show chat when markdown is successfully fetched
+    } else if (!fetchState.success && fetchState.error) {
+      setShowChat(false); // Hide chat if there's an error
     }
+
     const currentFormValues = form.getValues();
     let currentEffectiveProcessingOption: ProcessingOption | undefined;
     if (currentFormValues.processingMethod === 'external_api') {
@@ -125,20 +133,20 @@ const MarkdownFetcherPage: NextPage = () => {
       currentEffectiveProcessingOption = currentFormValues.localAiProcessingDetail;
     }
     
-    if (state.error) {
-      if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentEffectiveProcessingOption) {
-        const errorMessage = state.error.includes(': ') ? state.error.split(': ').slice(1).join(': ') : state.error;
+    if (fetchState.error) {
+      if (fetchState.submittedUrl === currentFormValues.url && fetchState.submittedProcessingOption === currentEffectiveProcessingOption) {
+        const errorMessage = fetchState.error.includes(': ') ? fetchState.error.split(': ').slice(1).join(': ') : fetchState.error;
         form.setError("url", { type: "manual", message: errorMessage });
       }
-    } else if (state.submittedUrl === currentFormValues.url && state.submittedProcessingOption === currentEffectiveProcessingOption) {
+    } else if (fetchState.submittedUrl === currentFormValues.url && fetchState.submittedProcessingOption === currentEffectiveProcessingOption) {
         form.clearErrors("url");
     }
-  }, [state, form]);
+  }, [fetchState, form]);
 
   const handleCopyToClipboard = async () => {
-    if (state.markdown) {
+    if (fetchState.markdown) {
       try {
-        await navigator.clipboard.writeText(state.markdown);
+        await navigator.clipboard.writeText(fetchState.markdown);
         setIsCopied(true);
         toast({
           title: "Success!",
@@ -157,18 +165,16 @@ const MarkdownFetcherPage: NextPage = () => {
   };
   
   const onSubmit = (data: FormValues) => {
-    console.log("Form submitted with data:", data); // Debugging line
+    console.log("Form submitted with data:", data);
     let finalProcessingOption: ProcessingOption;
 
     if (data.processingMethod === 'external_api') {
       finalProcessingOption = 'external_api';
     } else {
-      // localAiProcessingDetail is guaranteed by schema default and refine
       finalProcessingOption = data.localAiProcessingDetail!; 
     }
 
-    // Clear previous errors manually before new submission if they are for a different URL/option
-    if (state.error && (state.submittedUrl !== data.url || state.submittedProcessingOption !== finalProcessingOption)) {
+    if (fetchState.error && (fetchState.submittedUrl !== data.url || fetchState.submittedProcessingOption !== finalProcessingOption)) {
         form.clearErrors("url");
     }
 
@@ -185,85 +191,54 @@ const MarkdownFetcherPage: NextPage = () => {
   return (
     <div className="min-h-screen flex flex-col items-center p-4 sm:p-6 bg-background text-foreground">
       <AppHeader />
-
-      <Card className="w-full max-w-2xl shadow-xl rounded-lg">
-        <CardHeader>
-          <CardTitle className="text-2xl font-semibold">Fetch Web Content as Markdown</CardTitle>
-          <CardDescription>Enter a URL, choose how to process it, and get clean Markdown.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="url"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-sm font-medium">Website URL</FormLabel>
-                    <FormControl>
-                      <Input 
-                        placeholder="https://example.com" 
-                        {...field} 
-                        className="py-3 text-base bg-secondary/50 border-border focus:ring-primary focus:border-primary" 
-                        aria-describedby="url-error"
-                      />
-                    </FormControl>
-                    <FormMessage id="url-error" />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="processingMethod"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel className="text-sm font-medium">Processing Method</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={(value: 'local_ai' | 'external_api') => {
-                          field.onChange(value);
-                          if (value === 'local_ai' && !form.getValues('localAiProcessingDetail')) {
-                            form.setValue('localAiProcessingDetail', 'extract_body_strip_tags', { shouldValidate: true });
-                          }
-                        }}
-                        defaultValue={field.value}
-                        className="flex flex-col space-y-2"
-                      >
-                        {processingMethodOptions.map((option) => (
-                          <FormItem key={option.value} className="flex items-start space-x-3 space-y-0 p-3 border rounded-md bg-secondary/20 hover:bg-secondary/40 transition-colors">
-                            <FormControl>
-                              <RadioGroupItem value={option.value} />
-                            </FormControl>
-                            <div className="space-y-1 leading-none">
-                              <FormLabel className="font-normal cursor-pointer">
-                                {option.label}
-                              </FormLabel>
-                              <p className="text-xs text-muted-foreground">{option.description}</p>
-                            </div>
-                          </FormItem>
-                        ))}
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {watchedProcessingMethod === 'local_ai' && (
+      
+      <div className="flex flex-col md:flex-row md:space-x-6 w-full max-w-7xl">
+        {/* Column 1: Form Card */}
+        <Card className="w-full md:w-1/2 lg:w-2/5 shadow-xl rounded-lg mb-6 md:mb-0 flex flex-col">
+          <CardHeader>
+            <CardTitle className="text-2xl font-semibold">Fetch Web Content as Markdown</CardTitle>
+            <CardDescription>Enter a URL, choose how to process it, and get clean Markdown.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex-grow">
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
                 <FormField
                   control={form.control}
-                  name="localAiProcessingDetail"
+                  name="url"
                   render={({ field }) => (
-                    <FormItem className="space-y-3 pt-2 border-t mt-6">
-                      <FormLabel className="text-sm font-medium pt-4 block">Local AI - Content Handling Detail</FormLabel>
-                       <FormControl>
+                    <FormItem>
+                      <FormLabel className="text-sm font-medium">Website URL</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="https://example.com" 
+                          {...field} 
+                          className="py-3 text-base bg-secondary/50 border-border focus:ring-primary focus:border-primary" 
+                          aria-describedby="url-error"
+                        />
+                      </FormControl>
+                      <FormMessage id="url-error" />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="processingMethod"
+                  render={({ field }) => (
+                    <FormItem className="space-y-3">
+                      <FormLabel className="text-sm font-medium">Processing Method</FormLabel>
+                      <FormControl>
                         <RadioGroup
-                          onValueChange={field.onChange}
-                          value={field.value} // Use value here instead of defaultValue for controlled component
+                          onValueChange={(value: 'local_ai' | 'external_api') => {
+                            field.onChange(value);
+                            if (value === 'local_ai' && !form.getValues('localAiProcessingDetail')) {
+                              form.setValue('localAiProcessingDetail', 'extract_body_strip_tags', { shouldValidate: true });
+                            }
+                          }}
+                          defaultValue={field.value}
                           className="flex flex-col space-y-2"
                         >
-                          {localAiDetailOptionsConfig.map((option) => (
+                          {processingMethodOptions.map((option) => (
                             <FormItem key={option.value} className="flex items-start space-x-3 space-y-0 p-3 border rounded-md bg-secondary/20 hover:bg-secondary/40 transition-colors">
                               <FormControl>
                                 <RadioGroupItem value={option.value} />
@@ -282,45 +257,82 @@ const MarkdownFetcherPage: NextPage = () => {
                     </FormItem>
                   )}
                 />
-              )}
-              <SubmitButton pending={isPending} />
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
 
-      {state.error && !state.success && state.submittedUrl === form.getValues("url") && 
-       state.submittedProcessingOption === (form.getValues("processingMethod") === 'external_api' ? 'external_api' : form.getValues("localAiProcessingDetail")) && (
-        <Alert variant="destructive" className="mt-6 w-full max-w-2xl shadow-lg rounded-lg">
-          <AlertCircle className="h-5 w-5" />
-          <AlertTitle>Error Processing URL</AlertTitle>
-          <AlertDescription>{state.error}</AlertDescription>
-        </Alert>
-      )}
-
-      {state.success && state.markdown && (
-        <Card className="mt-6 w-full max-w-2xl shadow-xl rounded-lg animate-in fade-in-0 slide-in-from-bottom-3 duration-500 ease-out">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-2xl font-semibold">Formatted Markdown</CardTitle>
-            <Button variant="ghost" size="icon" onClick={handleCopyToClipboard} aria-label="Copy Markdown to clipboard">
-              {isCopied ? <Check className="h-5 w-5 text-green-500" /> : <ClipboardCopy className="h-5 w-5" />}
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              readOnly
-              value={state.markdown}
-              className="h-96 min-h-[200px] font-mono text-sm resize-y bg-secondary/30 border-border focus:ring-primary focus:border-primary p-3 rounded-md"
-              aria-label="Formatted Markdown content"
-              data-ai-hint="markdown text"
-            />
+                {watchedProcessingMethod === 'local_ai' && (
+                  <FormField
+                    control={form.control}
+                    name="localAiProcessingDetail"
+                    render={({ field }) => (
+                      <FormItem className="space-y-3 pt-2 border-t mt-6">
+                        <FormLabel className="text-sm font-medium pt-4 block">Local AI - Content Handling Detail</FormLabel>
+                         <FormControl>
+                          <RadioGroup
+                            onValueChange={field.onChange}
+                            value={field.value} 
+                            className="flex flex-col space-y-2"
+                          >
+                            {localAiDetailOptionsConfig.map((option) => (
+                              <FormItem key={option.value} className="flex items-start space-x-3 space-y-0 p-3 border rounded-md bg-secondary/20 hover:bg-secondary/40 transition-colors">
+                                <FormControl>
+                                  <RadioGroupItem value={option.value} />
+                                </FormControl>
+                                <div className="space-y-1 leading-none">
+                                  <FormLabel className="font-normal cursor-pointer">
+                                    {option.label}
+                                  </FormLabel>
+                                  <p className="text-xs text-muted-foreground">{option.description}</p>
+                                </div>
+                              </FormItem>
+                            ))}
+                          </RadioGroup>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                <SubmitButton pending={isFetchPending} />
+              </form>
+            </Form>
           </CardContent>
         </Card>
-      )}
-      <FloatingChat markdownContent={state.markdown} />
+
+        {/* Column 2: Markdown Display & Error Alert */}
+        <div className="w-full md:w-1/2 lg:w-3/5 flex flex-col">
+          {fetchState.error && !fetchState.success && fetchState.submittedUrl === form.getValues("url") && 
+           fetchState.submittedProcessingOption === (form.getValues("processingMethod") === 'external_api' ? 'external_api' : form.getValues("localAiProcessingDetail")) && (
+            <Alert variant="destructive" className="w-full shadow-lg rounded-lg mb-6">
+              <AlertCircle className="h-5 w-5" />
+              <AlertTitle>Error Processing URL</AlertTitle>
+              <AlertDescription>{fetchState.error}</AlertDescription>
+            </Alert>
+          )}
+
+          {fetchState.success && fetchState.markdown && (
+            <Card className="w-full shadow-xl rounded-lg flex flex-col flex-grow animate-in fade-in-0 slide-in-from-bottom-3 duration-500 ease-out">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-2xl font-semibold">Formatted Markdown</CardTitle>
+                <Button variant="ghost" size="icon" onClick={handleCopyToClipboard} aria-label="Copy Markdown to clipboard">
+                  {isCopied ? <Check className="h-5 w-5 text-green-500" /> : <ClipboardCopy className="h-5 w-5" />}
+                </Button>
+              </CardHeader>
+              <CardContent className="pt-0 flex-grow flex flex-col">
+                <Textarea
+                  readOnly
+                  value={fetchState.markdown}
+                  className="flex-grow min-h-[200px] font-mono text-sm resize-y bg-secondary/30 border-border focus:ring-primary focus:border-primary p-3 rounded-md"
+                  aria-label="Formatted Markdown content"
+                  data-ai-hint="markdown text"
+                />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+      
+      {showChat && <FloatingChat markdownContent={fetchState.markdown} sourceUrl={fetchState.submittedUrl} />}
     </div>
   );
 };
 
 export default MarkdownFetcherPage;
-
