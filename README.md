@@ -1,5 +1,4 @@
-# Firebase Studio
+# Markdown Fetcher
+### Make with Firebase Studio
 
-This is a NextJS starter in Firebase Studio.
-
-To get started, take a look at src/app/page.tsx.
+Enter a URL to fetch its content and convert it to Markdown format.
