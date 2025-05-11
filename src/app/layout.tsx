@@ -1,7 +1,9 @@
+
 import type {Metadata} from 'next';
 import { Nunito_Sans } from 'next/font/google'; // Changed from Geist to Nunito_Sans
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
+import { ThemeProvider } from '@/components/theme-provider';
 
 // Configure Nunito Sans font
 const nunitoSans = Nunito_Sans({
@@ -21,11 +23,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       {/* Apply Nunito Sans variable to the body */}
       <body className={`${nunitoSans.variable} antialiased`}>
-        {children}
-        <Toaster />
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );
